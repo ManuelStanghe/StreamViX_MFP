@@ -900,12 +900,60 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                     // staticUrlD
                     if ((channel as any).staticUrlD) {
                         if (mfpUrl && mfpPsw) {
-                            const daddyProxyUrl = `${mfpUrl}/extractor/video?host=DLHD&redirect_stream=true&api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent((channel as any).staticUrlD)}`;
-                            streams.push({
-                                url: daddyProxyUrl,
-                                title: `[🌐D] ${channel.name}`
-                            });
-                            debugLog(`Aggiunto staticUrlD Proxy (MFP): ${daddyProxyUrl}`);
+                            // Nuova logica: chiama extractor/video con redirect_stream=false, poi costruisci il link proxy/hls/manifest.m3u8
+                            const daddyApiBase = `${mfpUrl}/extractor/video?host=DLHD&redirect_stream=false&api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent((channel as any).staticUrlD)}`;
+                            try {
+                                const res = await fetch(daddyApiBase);
+                                if (res.ok) {
+                                    const data = await res.json();
+                                    let finalUrl = data.mediaflow_proxy_url || `${mfpUrl}/proxy/hls/manifest.m3u8`;
+                                    // Aggiungi i parametri di query se presenti
+                                    if (data.query_params) {
+                                        const params = new URLSearchParams();
+                                        for (const [key, value] of Object.entries(data.query_params)) {
+                                            if (value !== null) {
+                                                params.append(key, String(value));
+                                            }
+                                        }
+                                        finalUrl += (finalUrl.includes('?') ? '&' : '?') + params.toString();
+                                    }
+                                    // Aggiungi il parametro d per il destination_url
+                                    if (data.destination_url) {
+                                        const destParam = 'd=' + encodeURIComponent(data.destination_url);
+                                        finalUrl += (finalUrl.includes('?') ? '&' : '?') + destParam;
+                                    }
+                                    // Aggiungi gli header come parametri h_
+                                    if (data.request_headers) {
+                                        for (const [key, value] of Object.entries(data.request_headers)) {
+                                            if (value !== null) {
+                                                const headerParam = `h_${key}=${encodeURIComponent(String(value))}`;
+                                                finalUrl += '&' + headerParam;
+                                            }
+                                        }
+                                    }
+                                    streams.push({
+                                        url: finalUrl,
+                                        title: `[🌐D] ${channel.name}`
+                                    });
+                                    debugLog(`Aggiunto staticUrlD Proxy (MFP, nuova logica): ${finalUrl}`);
+                                } else {
+                                    // Fallback: vecchio link
+                                    const daddyProxyUrl = `${mfpUrl}/extractor/video?host=DLHD&redirect_stream=true&api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent((channel as any).staticUrlD)}`;
+                                    streams.push({
+                                        url: daddyProxyUrl,
+                                        title: `[🌐D] ${channel.name}`
+                                    });
+                                    debugLog(`Aggiunto staticUrlD Proxy (MFP, fallback): ${daddyProxyUrl}`);
+                                }
+                            } catch (err) {
+                                // Fallback: vecchio link
+                                const daddyProxyUrl = `${mfpUrl}/extractor/video?host=DLHD&redirect_stream=true&api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent((channel as any).staticUrlD)}`;
+                                streams.push({
+                                    url: daddyProxyUrl,
+                                    title: `[🌐D] ${channel.name}`
+                                });
+                                debugLog(`Aggiunto staticUrlD Proxy (MFP, errore): ${daddyProxyUrl}`);
+                            }
                         } else {
                             streams.push({
                                 url: (channel as any).staticUrlD,

@@ -13,6 +13,36 @@ import { execFile } from 'child_process';
 import * as crypto from 'crypto';
 import * as util from 'util';
 
+// Funzioni utility per decodifica base64
+function decodeBase64(str: string): string {
+    return Buffer.from(str, 'base64').toString('utf8');
+}
+
+// Funzione per decodificare URL statici (sempre in base64)
+function decodeStaticUrl(url: string): string {
+    if (!url) return url;
+    
+    console.log(`🔧 [Base64] Decodifica URL (sempre base64): ${url.substring(0, 50)}...`);
+    
+    try {
+        // Assicura padding corretto (lunghezza multipla di 4)
+        let paddedUrl = url;
+        while (paddedUrl.length % 4 !== 0) {
+            paddedUrl += '=';
+        }
+        
+        // Decodifica base64
+        const decoded = decodeBase64(paddedUrl);
+        console.log(`✅ [Base64] URL decodificato: ${decoded}`);
+        
+        return decoded;
+    } catch (error) {
+        console.error(`❌ [Base64] Errore nella decodifica: ${error}`);
+        console.log(`🔧 [Base64] Ritorno URL originale per errore`);
+        return url;
+    }
+}
+
 // Promisify execFile
 const execFilePromise = util.promisify(execFile);
 
@@ -21,7 +51,7 @@ interface AddonConfig {
   mediaFlowProxyUrl?: string;
   mediaFlowProxyPassword?: string;
   tmdbApiKey?: string;
-  bothLinks?: string;
+  enableMpd?: string;
   animeunityEnabled?: string;
   animesaturnEnabled?: string;
   enableLiveTV?: string;
@@ -82,7 +112,8 @@ const baseManifest: Manifest = {
                         "Sport",
                         "Cinema",
                         "Generali",
-                        "Documentari"
+                        "Documentari",
+                        "Pluto"
                     ]
                 }
             ]
@@ -109,8 +140,8 @@ const baseManifest: Manifest = {
             type: "text"
         },
         {
-            key: "bothLinks",
-            title: "Mostra entrambi i link (Proxy e Direct)",
+            key: "enableMpd",
+            title: "Enable MPD Streams",
             type: "checkbox"
         },
         {
@@ -524,6 +555,9 @@ function getChannelCategories(channel: any): string[] {
         if (name.includes('cinema') || name.includes('movie') || name.includes('warner')) {
             categories.push('movies');
         }
+        if (name.includes('pluto') || description.includes('pluto')) {
+            categories.push('pluto');
+        }
         
         if (categories.length === 0) {
             categories.push('general');
@@ -622,7 +656,7 @@ function normalizeProxyUrl(url: string): string {
 function createBuilder(initialConfig: AddonConfig = {}) {
     const manifest = loadCustomConfig();
     
-    if (initialConfig.mediaFlowProxyUrl || initialConfig.bothLinks || initialConfig.tmdbApiKey) {
+    if (initialConfig.mediaFlowProxyUrl || initialConfig.enableMpd || initialConfig.tmdbApiKey) {
         manifest.name;
     }
     
@@ -649,7 +683,8 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                     "Sport": "sport",
                     "Cinema": "movies",
                     "Generali": "general",
-                    "Documentari": "documentari"
+                    "Documentari": "documentari",
+                    "Pluto": "pluto"
                 };
                 
                 const targetCategory = genreMap[genre];
@@ -858,45 +893,124 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                     if ((channel as any).staticUrlF) {
                         streams.push({
                             url: (channel as any).staticUrlF,
-                            title: `[🌍dTV] ${channel.name}`
+                            title: `[🌍dTV] ${channel.name} [ITA]`
                         });
                         debugLog(`Aggiunto staticUrlF Direct: ${(channel as any).staticUrlF}`);
                     }
 
-                    // staticUrl
-                    if ((channel as any).staticUrl) {
+                    // staticUrl (solo se enableMpd è attivo)
+                    if ((channel as any).staticUrl && (config.enableMpd === 'on' || process.env.ENABLE_MPD?.toLowerCase() === 'true')) {
+                        console.log(`🔧 [staticUrl] Raw URL: ${(channel as any).staticUrl}`);
+                        const decodedUrl = decodeStaticUrl((channel as any).staticUrl);
+                        console.log(`🔧 [staticUrl] Decoded URL: ${decodedUrl}`);
+                        console.log(`🔧 [staticUrl] mfpUrl: ${mfpUrl}`);
+                        console.log(`🔧 [staticUrl] mfpPsw: ${mfpPsw ? '***' : 'NOT SET'}`);
+                        
                         if (mfpUrl && mfpPsw) {
-                            const proxyUrl = `${mfpUrl}/proxy/mpd/manifest.m3u8?api_password=${encodeURIComponent(mfpPsw)}&d=${(channel as any).staticUrl}`;
+                            // Parse l'URL decodificato per separare l'URL base dai parametri
+                            const urlParts = decodedUrl.split('&');
+                            const baseUrl = urlParts[0]; // Primo elemento è l'URL base
+                            const additionalParams = urlParts.slice(1); // Resto sono i parametri aggiuntivi
+                            
+                            // Costruisci l'URL del proxy con l'URL base nel parametro d
+                            let proxyUrl = `${mfpUrl}/proxy/mpd/manifest.m3u8?api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent(baseUrl)}`;
+                            
+                            // Aggiungi i parametri aggiuntivi (key_id, key, etc.) direttamente all'URL del proxy
+                            for (const param of additionalParams) {
+                                if (param) {
+                                    proxyUrl += `&${param}`;
+                                }
+                            }
+                            
                             streams.push({
                                 url: proxyUrl,
-                                title: `[📺HD] ${channel.name}`
+                                title: `[📺HD] ${channel.name} [ITA]`
                             });
                             debugLog(`Aggiunto staticUrl Proxy (MFP): ${proxyUrl}`);
                         } else {
                             streams.push({
-                                url: (channel as any).staticUrl,
-                                title: `[❌Proxy][📺HD] ${channel.name}`
+                                url: decodedUrl,
+                                title: `[❌Proxy][📺HD] ${channel.name} [ITA]`
                             });
-                            debugLog(`Aggiunto staticUrl Direct: ${(channel as any).staticUrl}`);
+                            debugLog(`Aggiunto staticUrl Direct: ${decodedUrl}`);
                         }
                     }
-                    // staticUrl2
-                    if ((channel as any).staticUrl2) {
+                    // staticUrl2 (solo se enableMpd è attivo)
+                    if ((channel as any).staticUrl2 && (config.enableMpd === 'on' || process.env.ENABLE_MPD?.toLowerCase() === 'true')) {
+                        console.log(`🔧 [staticUrl2] Raw URL: ${(channel as any).staticUrl2}`);
+                        const decodedUrl = decodeStaticUrl((channel as any).staticUrl2);
+                        console.log(`🔧 [staticUrl2] Decoded URL: ${decodedUrl}`);
+                        console.log(`🔧 [staticUrl2] mfpUrl: ${mfpUrl}`);
+                        console.log(`🔧 [staticUrl2] mfpPsw: ${mfpPsw ? '***' : 'NOT SET'}`);
+                        
                         if (mfpUrl && mfpPsw) {
-                            const proxyUrl = `${mfpUrl}/proxy/mpd/manifest.m3u8?api_password=${encodeURIComponent(mfpPsw)}&d=${(channel as any).staticUrl2}`;
+                            // Parse l'URL decodificato per separare l'URL base dai parametri
+                            const urlParts = decodedUrl.split('&');
+                            const baseUrl = urlParts[0]; // Primo elemento è l'URL base
+                            const additionalParams = urlParts.slice(1); // Resto sono i parametri aggiuntivi
+                            
+                            // Costruisci l'URL del proxy con l'URL base nel parametro d
+                            let proxyUrl = `${mfpUrl}/proxy/mpd/manifest.m3u8?api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent(baseUrl)}`;
+                            
+                            // Aggiungi i parametri aggiuntivi (key_id, key, etc.) direttamente all'URL del proxy
+                            for (const param of additionalParams) {
+                                if (param) {
+                                    proxyUrl += `&${param}`;
+                                }
+                            }
+                            
                             streams.push({
                                 url: proxyUrl,
-                                title: `[📽️FHD] ${channel.name}`
+                                title: `[📽️FHD] ${channel.name} [ITA]`
                             });
                             debugLog(`Aggiunto staticUrl2 Proxy (MFP): ${proxyUrl}`);
                         } else {
                             streams.push({
-                                url: (channel as any).staticUrl2,
-                                title: `[❌Proxy][📽️FHD] ${channel.name}`
+                                url: decodedUrl,
+                                title: `[❌Proxy][📽️FHD] ${channel.name} [ITA]`
                             });
-                            debugLog(`Aggiunto staticUrl2 Direct: ${(channel as any).staticUrl2}`);
+                            debugLog(`Aggiunto staticUrl2 Direct: ${decodedUrl}`);
                         }
                     }
+
+                    // staticUrlMpd (sempre attivo se presente, non dipende da enableMpd)
+                    if ((channel as any).staticUrlMpd) {
+                        console.log(`🔧 [staticUrlMpd] Raw URL: ${(channel as any).staticUrlMpd}`);
+                        const decodedUrl = decodeStaticUrl((channel as any).staticUrlMpd);
+                        console.log(`🔧 [staticUrlMpd] Decoded URL: ${decodedUrl}`);
+                        console.log(`🔧 [staticUrlMpd] mfpUrl: ${mfpUrl}`);
+                        console.log(`🔧 [staticUrlMpd] mfpPsw: ${mfpPsw ? '***' : 'NOT SET'}`);
+                        
+                        if (mfpUrl && mfpPsw) {
+                            // Parse l'URL decodificato per separare l'URL base dai parametri
+                            const urlParts = decodedUrl.split('&');
+                            const baseUrl = urlParts[0]; // Primo elemento è l'URL base
+                            const additionalParams = urlParts.slice(1); // Resto sono i parametri aggiuntivi
+                            
+                            // Costruisci l'URL del proxy con l'URL base nel parametro d
+                            let proxyUrl = `${mfpUrl}/proxy/mpd/manifest.m3u8?api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent(baseUrl)}`;
+                            
+                            // Aggiungi i parametri aggiuntivi (key_id, key, etc.) direttamente all'URL del proxy
+                            for (const param of additionalParams) {
+                                if (param) {
+                                    proxyUrl += `&${param}`;
+                                }
+                            }
+                            
+                            streams.push({
+                                url: proxyUrl,
+                                title: `[🎬MPD] ${channel.name} [ITA]`
+                            });
+                            debugLog(`Aggiunto staticUrlMpd Proxy (MFP): ${proxyUrl}`);
+                        } else {
+                            streams.push({
+                                url: decodedUrl,
+                                title: `[❌Proxy][🎬MPD] ${channel.name} [ITA]`
+                            });
+                            debugLog(`Aggiunto staticUrlMpd Direct: ${decodedUrl}`);
+                        }
+                    }
+                    
                     // staticUrlD
                     if ((channel as any).staticUrlD) {
                         if (mfpUrl && mfpPsw) {
@@ -933,7 +1047,7 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                                     }
                                     streams.push({
                                         url: finalUrl,
-                                        title: `[🌐D] ${channel.name}`
+                                        title: `[🌐D] ${channel.name} [ITA]`
                                     });
                                     debugLog(`Aggiunto staticUrlD Proxy (MFP, nuova logica): ${finalUrl}`);
                                 } else {
@@ -941,7 +1055,7 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                                     const daddyProxyUrl = `${mfpUrl}/extractor/video?host=DLHD&redirect_stream=true&api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent((channel as any).staticUrlD)}`;
                                     streams.push({
                                         url: daddyProxyUrl,
-                                        title: `[🌐D] ${channel.name}`
+                                        title: `[🌐D] ${channel.name} [ITA]`
                                     });
                                     debugLog(`Aggiunto staticUrlD Proxy (MFP, fallback): ${daddyProxyUrl}`);
                                 }
@@ -950,14 +1064,14 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                                 const daddyProxyUrl = `${mfpUrl}/extractor/video?host=DLHD&redirect_stream=true&api_password=${encodeURIComponent(mfpPsw)}&d=${encodeURIComponent((channel as any).staticUrlD)}`;
                                 streams.push({
                                     url: daddyProxyUrl,
-                                    title: `[🌐D] ${channel.name}`
+                                    title: `[🌐D] ${channel.name} [ITA]`
                                 });
                                 debugLog(`Aggiunto staticUrlD Proxy (MFP, errore): ${daddyProxyUrl}`);
                             }
                         } else {
                             streams.push({
                                 url: (channel as any).staticUrlD,
-                                title: `[❌Proxy][🌐D] ${channel.name}`
+                                title: `[❌Proxy][🌐D] ${channel.name} [ITA]`
                             });
                             debugLog(`Aggiunto staticUrlD Direct: ${(channel as any).staticUrlD}`);
                         }
@@ -1015,7 +1129,7 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                         // Se trovi almeno un link, aggiungi tutti come stream separati numerati
                         if (foundVavooLinks.length > 0) {
                             foundVavooLinks.forEach(({ url, key }, idx) => {
-                                const streamTitle = `[✌️V-${idx + 1}] ${channel.name}`;
+                                const streamTitle = `[✌️V-${idx + 1}] ${channel.name} [ITA]`;
                                 if (mfpUrl && mfpPsw) {
                                     const vavooProxyUrl = `${mfpUrl}/proxy/hls/manifest.m3u8?d=${encodeURIComponent(url)}&api_password=${encodeURIComponent(mfpPsw)}`;
                                     streams.push({
@@ -1036,7 +1150,7 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                             if (exact) {
                                 const links = Array.isArray(exact) ? exact : [exact];
                                 links.forEach((url, idx) => {
-                                    const streamTitle = `[✌️V-${idx + 1}] ${channel.name}`;
+                                    const streamTitle = `[✌️V-${idx + 1}] ${channel.name} [ITA]`;
                                     if (mfpUrl && mfpPsw) {
                                         const vavooProxyUrl = `${mfpUrl}/proxy/hls/manifest.m3u8?d=${encodeURIComponent(url)}&api_password=${encodeURIComponent(mfpPsw)}`;
                                         streams.push({
@@ -1083,12 +1197,10 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                 
                 // Gestione parallela AnimeUnity e AnimeSaturn per ID Kitsu, MAL, IMDB, TMDB
                 if ((id.startsWith('kitsu:') || id.startsWith('mal:') || id.startsWith('tt') || id.startsWith('tmdb:')) && (animeUnityEnabled || animeSaturnEnabled)) {
-                    const bothLinkValue = config.bothLinks === 'on';
                     const animeUnityConfig: AnimeUnityConfig = {
                         enabled: animeUnityEnabled,
                         mfpUrl: config.mediaFlowProxyUrl || process.env.MFP_URL || '',
                         mfpPassword: config.mediaFlowProxyPassword || process.env.MFP_PSW || '',
-                        bothLink: bothLinkValue,
                         tmdbApiKey: config.tmdbApiKey || process.env.TMDB_API_KEY || ''
                     };
                     const animeSaturnConfig = {
@@ -1097,7 +1209,6 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                         mfpPassword: config.mediaFlowProxyPassword || process.env.MFP_PSW || '',
                         mfpProxyUrl: config.mediaFlowProxyUrl || process.env.MFP_URL || '',
                         mfpProxyPassword: config.mediaFlowProxyPassword || process.env.MFP_PSW || '',
-                        bothLink: bothLinkValue,
                         tmdbApiKey: config.tmdbApiKey || process.env.TMDB_API_KEY || ''
                     };
                     let animeUnityStreams: Stream[] = [];
@@ -1181,22 +1292,10 @@ function createBuilder(initialConfig: AddonConfig = {}) {
                 if (!id.startsWith('kitsu:') && !id.startsWith('mal:') && !id.startsWith('tv:')) {
                     console.log(`📺 Processing non-Kitsu or MAL ID with VixSrc: ${id}`);
                     
-                    let bothLinkValue: boolean;
-                    if (config.bothLinks !== undefined) {
-                        bothLinkValue = config.bothLinks === 'on';
-                    } else {
-                        bothLinkValue = process.env.BOTHLINK?.toLowerCase() === 'true';
-                    }
-
-                    console.log(`🔧 DEBUG - bothLinks config: "${config.bothLinks}"`);
-                    console.log(`🔧 DEBUG - bothLinks env: "${process.env.BOTHLINK}"`);
-                    console.log(`🔧 DEBUG - bothLinkValue final: ${bothLinkValue}`);
-
                     const finalConfig: ExtractorConfig = {
                         tmdbApiKey: config.tmdbApiKey || process.env.TMDB_API_KEY,
                         mfpUrl: config.mediaFlowProxyUrl || process.env.MFP_URL,
-                        mfpPsw: config.mediaFlowProxyPassword || process.env.MFP_PSW,
-                        bothLink: bothLinkValue
+                        mfpPsw: config.mediaFlowProxyPassword || process.env.MFP_PSW
                     };
 
                     const res: VixCloudStreamInfo[] | null = await getStreamContent(id, type, finalConfig);

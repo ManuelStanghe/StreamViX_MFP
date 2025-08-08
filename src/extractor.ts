@@ -15,7 +15,6 @@ export interface ExtractorConfig {
   tmdbApiKey?: string;
   mfpUrl?: string;
   mfpPsw?: string;
-  bothLink?: boolean;
 }
 
 export interface VixCloudStreamInfo {
@@ -210,29 +209,9 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
 
   // Funzione per ottenere il proxy stream
   async function getProxyStream(url: string, id: string, type: ContentType, config: ExtractorConfig): Promise<VixCloudStreamInfo | null> {
-    const { mfpUrl, mfpPsw, bothLink, tmdbApiKey } = config;
+    const { mfpUrl, mfpPsw, tmdbApiKey } = config;
     if (!mfpUrl || !mfpPsw) {
-      // Se BOTHLINK è true ma manca il proxy, restituisci un placeholder
-      if (bothLink) {
-        const tmdbApiTitle = type === 'movie' ? await getMovieTitle(id, tmdbApiKey) : await getSeriesTitle(id, tmdbApiKey);
-        let fallbackName = 'Proxy Missing';
-        
-        if (tmdbApiTitle) {
-          fallbackName = tmdbApiTitle;
-          if (type !== 'movie') {
-            const obj = getObject(id);
-            fallbackName += ` (S${obj.season}E${obj.episode})`;
-          }
-          fallbackName += ' (Proxy Missing)';
-        }
-        
-        return {
-          name: fallbackName,
-          streamUrl: '', // URL vuoto per indicare che il proxy manca
-          referer: url,
-          source: 'proxy'
-        };
-      }
+      console.warn('VixSrc: Proxy MFP non configurato');
       return null;
     }
 
@@ -314,14 +293,14 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
         const obj = getObject(id);
         finalNameForProxy += ` (S${obj.season}E${obj.episode})`;
       }
-      finalNameForProxy += ' (Proxy)'; // Aggiungi sempre (Proxy)
+      finalNameForProxy += ' (Proxy) [ITA]'; // Aggiungi sempre (Proxy)
     } else { // Titolo TMDB non trovato, usa il fallback
       if (type === 'movie') {
-        finalNameForProxy = 'Movie Stream (Proxy)';
+        finalNameForProxy = 'Movie Stream (Proxy) [ITA]';
       } else { // Serie
         const obj = getObject(id);
         // Per richiesta utente, anche i titoli di fallback delle serie dovrebbero avere S/E
-        finalNameForProxy = `Series Stream (Proxy) (S${obj.season}E${obj.episode})`;
+        finalNameForProxy = `Series Stream (Proxy) (S${obj.season}E${obj.episode}) [ITA]`;
       }
     }
     
@@ -442,19 +421,19 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
       if (baseTitle) {
         // Se abbiamo un titolo, ora siamo sicuri che sia una stringa.
         if (type === 'movie') {
-          determinedName = baseTitle;
+          determinedName = `${baseTitle} [ITA]`;
         } else { // È una serie, aggiungi info S/E
           const obj = getObject(id);
-          determinedName = `${baseTitle} (S${obj.season}E${obj.episode})`;
+          determinedName = `${baseTitle} (S${obj.season}E${obj.episode}) [ITA]`;
         }
       } else {
         // Se non abbiamo un titolo (baseTitle è null), usiamo un nome di fallback.
         if (type === 'movie') {
-          determinedName = 'Movie Stream (Direct)';
+          determinedName = 'Movie Stream (Direct) [ITA]';
         } else { // È una serie
           const obj = getObject(id);
           // Per richiesta utente, anche i titoli di fallback delle serie dovrebbero avere S/E
-          determinedName = `Series Stream (Direct) (S${obj.season}E${obj.episode})`;
+          determinedName = `Series Stream (Direct) (S${obj.season}E${obj.episode}) [ITA]`;
         }
       }
       
@@ -480,30 +459,14 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
     }
   }
 
-  // --- Logica principale basata su BOTHLINK ---
-  const results: VixCloudStreamInfo[] = [];
-
-  if (config.bothLink) {
-    // Se BOTHLINK è true, ottieni entrambi i stream
-    console.log('BOTHLINK mode: fetching both proxy and direct streams');
-    
+  // --- Logica principale: SOLO PROXY per VixSrc ---
+  if (config.mfpUrl && config.mfpPsw) {
+    console.log('VixSrc: Using proxy mode only');
     const proxyStream = await getProxyStream(targetUrl, id, type, config);
-    const directStream = await getDirectStream(targetUrl, id, type, config);
-    
-    if (proxyStream) results.push(proxyStream);
-    if (directStream) results.push(directStream);
-    
-    return results.length > 0 ? results : null;
+    return proxyStream ? [proxyStream] : null;
   } else {
-    // Logica originale: proxy se configurato, altrimenti direct
-    if (config.mfpUrl && config.mfpPsw) {
-      // --- Proxy Mode ---
-      const proxyStream = await getProxyStream(targetUrl, id, type, config);
-      return proxyStream ? [proxyStream] : null;
-    } else {
-      // --- Direct Extraction Mode (if proxy not configured) ---
-      const directStream = await getDirectStream(targetUrl, id, type, config);
-      return directStream ? [directStream] : null;
-    }
+    console.warn('VixSrc: Proxy MFP non configurato, nessun stream disponibile');
+    return null;
   }
 }
+

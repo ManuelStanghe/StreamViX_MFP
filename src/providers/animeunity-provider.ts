@@ -205,9 +205,9 @@ export class AnimeUnityProvider {
           if (seen.has(key)) continue;
           seen.add(key);
           const nameLower = r.name.toLowerCase();
-          let language_type = 'SUB';
+          let language_type = 'SUB ITA';
           if (nameLower.includes('cr')) {
-            language_type = 'CR';
+            language_type = 'CR ITA';
           } else if (nameLower.includes('ita')) {
             language_type = 'ITA';
           }
@@ -406,16 +406,6 @@ export class AnimeUnityProvider {
             }
           });
           seenLinks.add(mediaFlowUrl);
-        }
-        if (this.config.bothLink && streamResult.embed_url && !seenLinks.has(streamResult.embed_url)) {
-          streams.push({
-            title: `[E] ${streamTitle}`,
-            url: streamResult.embed_url,
-            behaviorHints: {
-              notWebReady: true
-            }
-          });
-          seenLinks.add(streamResult.embed_url);
         }
       }
     }
